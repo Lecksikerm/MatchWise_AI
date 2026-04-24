@@ -38,9 +38,15 @@ const cvSchema = new mongoose.Schema(
             certifications: [String],
             tools: [String],
         },
-        aiSummary: {
-            type: String,
-            default: '',
+        aiAnalysis: {
+            summary: {
+                type: String,
+                default: '',
+            },
+            strengths: [String],
+            weaknesses: [String],
+            suggestions: [String],
+            recommendedRoles: [String],
         },
     },
     { timestamps: true }

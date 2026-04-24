@@ -4,6 +4,7 @@ const parsePdf = require('../services/parsePdf');
 const parseDocx = require('../services/parseDocx');
 const extractCvData = require('../services/extractCvData');
 const { uploadToCloudinary } = require('../services/cloudinaryService');
+const { generateCvAnalysis } = require('../services/aiService');
 
 exports.uploadCV = async (req, res, next) => {
     try {
@@ -84,6 +85,20 @@ exports.uploadCV = async (req, res, next) => {
 
         const parsedData = extractCvData(extractedText);
 
+        let aiAnalysis = {
+            summary: '',
+            strengths: [],
+            weaknesses: [],
+            suggestions: [],
+            recommendedRoles: [],
+        };
+
+        try {
+            aiAnalysis = await generateCvAnalysis(extractedText, parsedData.skills);
+        } catch (error) {
+            console.error('Gemini CV analysis error:', error.message);
+        }
+
         const cv = await CV.create({
             user: req.user.id,
             originalFileName: req.file.originalname,
@@ -93,6 +108,7 @@ exports.uploadCV = async (req, res, next) => {
             fileType: req.file.mimetype,
             extractedText,
             parsedData,
+            aiAnalysis,
         });
 
         if (fs.existsSync(req.file.path)) {

@@ -1,6 +1,7 @@
 const CV = require('../models/CV');
 const MatchResult = require('../models/MatchResult');
 const { calculateMatchScore } = require('../services/scoreService');
+const { generateJobMatchAdvice } = require('../services/aiService');
 
 exports.analyzeMatch = async (req, res, next) => {
     try {
@@ -29,6 +30,26 @@ exports.analyzeMatch = async (req, res, next) => {
             cvSkills: cv.parsedData.skills || [],
             jobDescription,
         });
+        let aiAdvice = {
+            matchSummary: '',
+            strengthsForRole: [],
+            missingSkillsAdvice: [],
+            cvImprovementTips: [],
+            applicationAdvice: '',
+        };
+
+        try {
+            aiAdvice = await generateJobMatchAdvice({
+                cvText: cv.extractedText,
+                jobTitle,
+                jobDescription,
+                score: result.score,
+                matchedSkills: result.matchedSkills,
+                missingSkills: result.missingSkills,
+            });
+        } catch (error) {
+            console.error('Gemini job match advice error:', error.message);
+        }
 
         const matchResult = await MatchResult.create({
             user: req.user.id,
@@ -39,6 +60,7 @@ exports.analyzeMatch = async (req, res, next) => {
             matchedSkills: result.matchedSkills,
             missingSkills: result.missingSkills,
             recommendations: result.recommendations,
+            aiAdvice,                  
         });
 
         res.status(201).json({

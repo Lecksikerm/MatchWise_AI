@@ -27,6 +27,19 @@ const matchResultSchema = new mongoose.Schema(
         matchedSkills: [String],
         missingSkills: [String],
         recommendations: [String],
+        aiAdvice: {
+            matchSummary: {
+                type: String,
+                default: '',
+            },
+            strengthsForRole: [String],
+            missingSkillsAdvice: [String],
+            cvImprovementTips: [String],
+            applicationAdvice: {
+                type: String,
+                default: '',
+            },
+        },
     },
     { timestamps: true }
 );
