@@ -99,6 +99,17 @@ exports.uploadCV = async (req, res, next) => {
             console.error('Gemini CV analysis error:', error.message);
         }
 
+        if (!aiAnalysis.summary || !aiAnalysis.summary.trim()) {
+            const skillSummary = parsedData.skills?.length
+                ? `Skills detected: ${parsedData.skills.join(', ')}.`
+                : '';
+            const textPreview = meaningfulText
+                ? `${meaningfulText.slice(0, 250)}${meaningfulText.length > 250 ? '...' : ''}`
+                : 'No useful CV text was extracted.';
+
+            aiAnalysis.summary = skillSummary || `CV content preview: ${textPreview}`;
+        }
+
         const cv = await CV.create({
             user: req.user.id,
             originalFileName: req.file.originalname,

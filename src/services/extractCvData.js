@@ -24,12 +24,21 @@ const knownSkills = [
     'c++',
     'html',
     'css',
+    'aws lambda',
+    'azure',
+    'google cloud',
+    'data science',
+    'machine learning',
+    'scrum',
+    'agile',
 ];
 
 const extractCvData = (text) => {
-    const lowerText = text.toLowerCase();
+    const lowerText = String(text || '').toLowerCase();
 
-    const skills = knownSkills.filter((skill) => lowerText.includes(skill));
+    const skills = [...new Set(
+        knownSkills.filter((skill) => lowerText.includes(skill.toLowerCase()))
+    )];
 
     return {
         skills,
