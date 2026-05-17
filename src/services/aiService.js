@@ -21,6 +21,30 @@ const safeParse = (text, fallback) => {
   }
 };
 
+const createMatchSummary = (score, matchedSkills = [], missingSkills = []) => {
+  if (score === 0 && matchedSkills.length === 0 && missingSkills.length === 0) {
+    return 'No recognizable technical keywords were found in the job description. Try adding more detail or specific technologies.';
+  }
+
+  return `Match score: ${score}%. Matched: ${matchedSkills.length ? matchedSkills.join(', ') : 'None'}. Missing: ${missingSkills.length ? missingSkills.join(', ') : 'None'}.`;
+};
+
+const createApplicationAdvice = (score, matchedSkills = [], missingSkills = []) => {
+  if (score === 0 && matchedSkills.length === 0 && missingSkills.length === 0) {
+    return 'The job description did not include recognizable skills. Add more detail or target a role that matches your experience better.';
+  }
+
+  if (score >= 80) {
+    return 'Strong match. You can apply with confidence and mention the relevant skills in your application.';
+  }
+
+  if (score >= 50) {
+    return 'Moderate match. Highlight your strongest related skills and consider improving the missing skills before applying.';
+  }
+
+  return 'Low match. Consider refining your CV or targeting a role that is closer to your current skill set.';
+};
+
 const generateCvAnalysis = async (cvText, parsedSkills = []) => {
   return queueRun(async () => {
     try {
@@ -140,34 +164,40 @@ Use this JSON structure:
         },
       });
 
-      return safeParse(response.text, {
+      const parsedAdvice = safeParse(response.text, {
         matchSummary: response.text || '',
         strengthsForRole: [],
         missingSkillsAdvice: [],
         cvImprovementTips: [],
         applicationAdvice: '',
       });
+
+      return {
+        ...parsedAdvice,
+        matchSummary: parsedAdvice.matchSummary || createMatchSummary(score, matchedSkills, missingSkills),
+        applicationAdvice: createApplicationAdvice(score, matchedSkills, missingSkills),
+      };
     } catch (error) {
       console.error('Job match advice error:', error.message);
 
       if (error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
         console.warn('⚠️  API quota exceeded. Returning fallback match advice.');
         return {
-          matchSummary: `Match score: ${score}%. Matched: ${matchedSkills.join(', ') || 'None'}. Missing: ${missingSkills.join(', ') || 'None'}`,
+          matchSummary: createMatchSummary(score, matchedSkills, missingSkills),
           strengthsForRole: matchedSkills.slice(0, 3) || [],
           missingSkillsAdvice: matchedSkills.map(s => `Consider learning ${s}`) || [],
           cvImprovementTips: [],
-          applicationAdvice: 'File your application with confidence in your matched skills.',
+          applicationAdvice: createApplicationAdvice(score, matchedSkills, missingSkills),
           _note: 'Advice provided without AI analysis due to API quota limits',
         };
       }
 
       return {
-        matchSummary: `Match score: ${score}%. Matched: ${matchedSkills.join(', ') || 'None'}. Missing: ${missingSkills.join(', ') || 'None'}`,
+        matchSummary: createMatchSummary(score, matchedSkills, missingSkills),
         strengthsForRole: matchedSkills.slice(0, 3) || [],
         missingSkillsAdvice: matchedSkills.map(s => `Consider learning ${s}`) || [],
         cvImprovementTips: [],
-        applicationAdvice: 'File your application with confidence in your matched skills.',
+        applicationAdvice: createApplicationAdvice(score, matchedSkills, missingSkills),
         _note: 'Fallback advice provided after AI error',
       };
     }
