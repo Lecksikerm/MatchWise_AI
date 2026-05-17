@@ -20,6 +20,8 @@ const allowedOrigins = (process.env.FRONTEND_URL || '')
 
 const startWorker = async () => {
     const server = http.createServer(app);
+    server.setTimeout(Number(process.env.SERVER_TIMEOUT_MS) || 120000);
+    server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS) || 65000;
     const io = new Server(server, {
         cors: {
             origin: (origin, callback) => {

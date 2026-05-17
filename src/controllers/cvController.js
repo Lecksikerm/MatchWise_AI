@@ -1,4 +1,4 @@
-const fs = require('fs');
+const { promises: fsPromises } = require('fs');
 const CV = require('../models/CV');
 const { extractText } = require('../services/universalTextExtractor');
 const extractCvData = require('../services/extractCvData');
@@ -138,8 +138,12 @@ exports.uploadCV = async (req, res, next) => {
             aiAnalysis,
         });
 
-        if (fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
+        try {
+            await fsPromises.unlink(req.file.path);
+        } catch (cleanupError) {
+            if (cleanupError.code !== 'ENOENT') {
+                console.warn('Failed to delete temporary file after upload:', cleanupError);
+            }
         }
 
         if (io) {
@@ -168,8 +172,14 @@ exports.uploadCV = async (req, res, next) => {
             },
         });
     } catch (error) {
-        if (req.file?.path && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
+        if (req.file?.path) {
+            try {
+                await fsPromises.unlink(req.file.path);
+            } catch (cleanupError) {
+                if (cleanupError.code !== 'ENOENT') {
+                    console.warn('Failed to delete temporary file after error:', cleanupError);
+                }
+            }
         }
 
         next(error);
