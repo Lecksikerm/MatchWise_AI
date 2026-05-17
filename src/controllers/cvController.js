@@ -1,10 +1,9 @@
 const fs = require('fs');
 const CV = require('../models/CV');
-const parsePdf = require('../services/parsePdf');
-const parseDocx = require('../services/parseDocx');
+const { extractText } = require('../services/universalTextExtractor');
 const extractCvData = require('../services/extractCvData');
 const { uploadToCloudinary } = require('../services/cloudinaryService');
-const { generateCvAnalysis } = require('../services/aiService');
+const { generateCvAnalysis, generateTextSummary } = require('../services/aiService');
 
 exports.uploadCV = async (req, res, next) => {
     try {
@@ -21,7 +20,7 @@ exports.uploadCV = async (req, res, next) => {
         if (io) {
             io.to(userRoom).emit('cv:status', {
                 step: 'uploading',
-                message: 'Uploading CV to cloud storage...',
+                message: 'Uploading file to cloud storage...',
             });
         }
 
@@ -30,61 +29,56 @@ exports.uploadCV = async (req, res, next) => {
         if (io) {
             io.to(userRoom).emit('cv:status', {
                 step: 'parsing',
-                message: 'Extracting CV content...',
+                message: 'Extracting text content from file...',
             });
         }
 
         let extractedText = '';
+        let extractionQuality = 'good';
+        let isScannedPdf = false;
 
         try {
-            if (req.file.mimetype === 'application/pdf') {
-                // Update status for PDF processing
-                if (io) {
-                    io.to(userRoom).emit('cv:status', {
-                        step: 'parsing',
-                        message: 'Extracting CV content (may take longer for complex PDFs)...',
-                    });
-                }
-                extractedText = await parsePdf(req.file.path);
-            } else {
-                extractedText = await parseDocx(req.file.path);
+            // Use universal text extractor for any file type
+            const extraction = await extractText(
+                req.file.path,
+                req.file.mimetype,
+                req.file.originalname
+            );
+            extractedText = extraction.text;
+
+            // Check if this is a scanned PDF
+            if (extractedText.includes('[SCANNED_PDF')) {
+                isScannedPdf = true;
+                extractionQuality = 'limited';
+                console.warn('⚠️  Scanned PDF detected - limited text extraction');
             }
+
+            // Flag if extraction had issues
+            if (extraction.error) {
+                console.warn(`Extraction warning: ${extraction.error}`);
+                extractionQuality = 'limited';
+            }
+
+            console.log(`✓ Successfully extracted text: ${extractedText.length} characters (quality: ${extractionQuality})`);
         } catch (error) {
-            console.error('Error extracting text from CV:', error);
+            console.error('Error extracting text:', error);
             return res.status(400).json({
                 success: false,
-                message: 'Failed to extract text from CV. The file may be corrupted, password-protected, or in an unsupported format.',
+                message: `Failed to extract text: ${error.message}`,
             });
-        }
-
-        // Check if we have meaningful text content
-        // For scanned PDFs, we might get very little or no text
-        const meaningfulText = extractedText.trim();
-        console.log(`Raw extracted text length: ${extractedText.length}`);
-        console.log(`Trimmed text length: ${meaningfulText.length}`);
-        console.log(`First 200 chars: "${meaningfulText.substring(0, 200)}"`);
-
-        // If we extracted some meaningful text, great!
-        // If not, we'll still allow the upload but warn the user
-        if (!meaningfulText || meaningfulText.length < 5) {
-            console.log(`Warning: Extracted text too short (${meaningfulText.length} characters). This might be a scanned PDF.`);
-
-            // For now, let's allow the upload anyway and store what we have
-            // The user can decide how to handle scanned PDFs later
-            if (meaningfulText.length === 0) {
-                extractedText = "This appears to be a scanned PDF. Text extraction was not possible.";
-            }
         }
 
         if (io) {
             io.to(userRoom).emit('cv:status', {
                 step: 'analyzing',
-                message: 'Analyzing CV skills and structure...',
+                message: 'Analyzing content and generating summary...',
             });
         }
 
+        // Extract skills and data from the text
         const parsedData = extractCvData(extractedText);
 
+        // Generate AI analysis
         let aiAnalysis = {
             summary: '',
             strengths: [],
@@ -94,20 +88,42 @@ exports.uploadCV = async (req, res, next) => {
         };
 
         try {
-            aiAnalysis = await generateCvAnalysis(extractedText, parsedData.skills);
+            // For CV files, use detailed CV analysis
+            if (req.file.originalname.toLowerCase().includes('cv') ||
+                req.file.originalname.toLowerCase().includes('resume')) {
+                aiAnalysis = await generateCvAnalysis(extractedText, parsedData.skills);
+            } else {
+                // For other documents, generate general summary
+                const summary = await generateTextSummary(extractedText, 'document', {
+                    skills: parsedData.skills,
+                });
+                aiAnalysis = {
+                    summary: summary.summary,
+                    strengths: summary.highlights || [],
+                    weaknesses: [],
+                    suggestions: summary.recommendations || [],
+                    recommendedRoles: summary.topics || [],
+                };
+            }
         } catch (error) {
-            console.error('Gemini CV analysis error:', error.message);
+            console.error('AI analysis error:', error.message);
+
+            // Check if it's a quota error
+            if (error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+                console.warn('⚠️  Gemini API quota exceeded. Using basic analysis.');
+                aiAnalysis.summary = `File processed: ${req.file.originalname}. ${parsedData.skills?.length ? `Skills detected: ${parsedData.skills.join(', ')}` : 'Content analysis available.'}`;
+            } else if (extractionQuality === 'limited' || extractedText.includes('[') || extractedText.includes('Error')) {
+                aiAnalysis.summary = `File processed: ${req.file.originalname}. ${parsedData.skills?.length ? `Detected skills: ${parsedData.skills.join(', ')}` : 'Limited text content available.'}`;
+            } else {
+                aiAnalysis.summary = parsedData.skills?.length
+                    ? `Content detected with skills: ${parsedData.skills.join(', ')}`
+                    : extractedText.slice(0, 250);
+            }
         }
 
+        // Ensure summary exists
         if (!aiAnalysis.summary || !aiAnalysis.summary.trim()) {
-            const skillSummary = parsedData.skills?.length
-                ? `Skills detected: ${parsedData.skills.join(', ')}.`
-                : '';
-            const textPreview = meaningfulText
-                ? `${meaningfulText.slice(0, 250)}${meaningfulText.length > 250 ? '...' : ''}`
-                : 'No useful CV text was extracted.';
-
-            aiAnalysis.summary = skillSummary || `CV content preview: ${textPreview}`;
+            aiAnalysis.summary = extractedText.slice(0, 300) + (extractedText.length > 300 ? '...' : '');
         }
 
         const cv = await CV.create({
@@ -129,22 +145,26 @@ exports.uploadCV = async (req, res, next) => {
         if (io) {
             io.to(userRoom).emit('cv:status', {
                 step: 'completed',
-                message: 'CV uploaded and analyzed successfully',
+                message: 'File uploaded and analyzed successfully',
             });
         }
 
-        // Check if this appears to be a scanned PDF
-        const isScannedPdf = extractedText.includes("This appears to be a scanned PDF");
+        // Prepare appropriate message based on extraction quality
+        let message = 'File uploaded and analyzed successfully';
+        if (isScannedPdf) {
+            message = 'Scanned PDF uploaded. Text extraction is limited. Consider re-uploading as a searchable PDF or using OCR software first.';
+        } else if (extractionQuality === 'limited') {
+            message = 'File uploaded with limited text extraction quality. AI analysis may be basic.';
+        }
 
         res.status(201).json({
             success: true,
-            message: isScannedPdf
-                ? 'CV uploaded successfully. Note: This appears to be a scanned PDF. Text extraction was limited.'
-                : 'CV uploaded and analyzed successfully',
+            message,
             data: {
                 ...cv.toObject(),
+                extractionQuality,
                 isScannedPdf,
-                textExtractionQuality: isScannedPdf ? 'limited' : 'good'
+                textLength: extractedText.length,
             },
         });
     } catch (error) {

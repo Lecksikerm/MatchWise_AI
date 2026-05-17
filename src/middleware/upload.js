@@ -20,15 +20,48 @@ const storage = multer.diskStorage({
 
 const fileFilter = (req, file, cb) => {
     const allowedTypes = [
+        // Document files
         'application/pdf',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/msword',
+        'text/plain',
+        'text/html',
+        'application/xml',
+        'text/xml',
+
+        // Image files (for OCR)
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/bmp',
+        'image/webp',
+        'image/tiff',
     ];
 
-    if (allowedTypes.includes(file.mimetype)) {
+    const allowedExtensions = [
+        '.pdf',
+        '.doc',
+        '.docx',
+        '.txt',
+        '.html',
+        '.htm',
+        '.xml',
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.gif',
+        '.bmp',
+        '.webp',
+        '.tiff',
+        '.tif',
+    ];
+
+    const fileExtension = require('path').extname(file.originalname).toLowerCase();
+
+    if (allowedTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
         cb(null, true);
     } else {
-        cb(new Error('Only PDF, DOC, and DOCX files are allowed'));
+        cb(new Error(`Unsupported file type: ${file.mimetype || fileExtension}. Allowed: PDF, Word docs, TXT, HTML, Images (JPG, PNG, GIF, BMP, WEBP, TIFF), XML`));
     }
 };
 

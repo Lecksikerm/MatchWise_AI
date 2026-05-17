@@ -20,7 +20,8 @@ const safeParse = (text, fallback) => {
 };
 
 const generateCvAnalysis = async (cvText, parsedSkills = []) => {
-  const prompt = `
+  try {
+    const prompt = `
 Return ONLY valid JSON.
 
 Analyze this CV:
@@ -40,22 +41,40 @@ Use this JSON structure:
 }
 `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-      temperature: 0.4,
-    },
-  });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.4,
+      },
+    });
 
-  return safeParse(response.text, {
-    summary: response.text || '',
-    strengths: [],
-    weaknesses: [],
-    suggestions: [],
-    recommendedRoles: [],
-  });
+    return safeParse(response.text, {
+      summary: response.text || '',
+      strengths: [],
+      weaknesses: [],
+      suggestions: [],
+      recommendedRoles: [],
+    });
+  } catch (error) {
+    // Handle quota and other API errors gracefully
+    console.error('CV Analysis error:', error.message);
+
+    if (error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('⚠️  API quota exceeded. Returning fallback analysis.');
+      return {
+        summary: `CV analyzed. Skills detected: ${parsedSkills.join(', ') || 'None detected'}`,
+        strengths: parsedSkills.slice(0, 3) || [],
+        weaknesses: [],
+        suggestions: [],
+        recommendedRoles: [],
+        _note: 'Summary provided without AI analysis due to API quota limits',
+      };
+    }
+
+    throw error;
+  }
 };
 
 const generateJobMatchAdvice = async ({
@@ -66,7 +85,8 @@ const generateJobMatchAdvice = async ({
   matchedSkills = [],
   missingSkills = [],
 }) => {
-  const prompt = `
+  try {
+    const prompt = `
 Return ONLY valid JSON.
 
 The user wants to apply for this job.
@@ -99,25 +119,118 @@ Use this JSON structure:
 }
 `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-lite',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-      temperature: 0.4,
-    },
-  });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-lite',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.4,
+      },
+    });
 
-  return safeParse(response.text, {
-    matchSummary: response.text || '',
-    strengthsForRole: [],
-    missingSkillsAdvice: [],
-    cvImprovementTips: [],
-    applicationAdvice: '',
-  });
+    return safeParse(response.text, {
+      matchSummary: response.text || '',
+      strengthsForRole: [],
+      missingSkillsAdvice: [],
+      cvImprovementTips: [],
+      applicationAdvice: '',
+    });
+  } catch (error) {
+    console.error('Job match advice error:', error.message);
+
+    if (error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('⚠️  API quota exceeded. Returning fallback match advice.');
+      return {
+        matchSummary: `Match score: ${score}%. Matched: ${matchedSkills.join(', ') || 'None'}. Missing: ${missingSkills.join(', ') || 'None'}`,
+        strengthsForRole: matchedSkills.slice(0, 3) || [],
+        missingSkillsAdvice: missingSkills.map(s => `Consider learning ${s}`) || [],
+        cvImprovementTips: [],
+        applicationAdvice: 'File your application with confidence in your matched skills.',
+        _note: 'Advice provided without AI analysis due to API quota limits',
+      };
+    }
+
+    throw error;
+  }
+};
+
+/**
+ * Generate a comprehensive summary for any extracted text
+ * Works for CV, resume, documents, or any text-based content
+ */
+const generateTextSummary = async (extractedText, documentType = 'document', additionalContext = {}) => {
+  try {
+    const prompt = `
+Return ONLY valid JSON.
+
+Analyze and summarize this ${documentType}:
+
+${String(extractedText || '').slice(0, 8000)}
+
+${additionalContext.skills ? `Key skills found: ${additionalContext.skills.join(', ')}` : ''}
+
+Provide a comprehensive analysis with this JSON structure:
+{
+  "summary": "2-3 sentence executive summary of the document content",
+  "keyPoints": ["important point 1", "important point 2", "important point 3"],
+  "highlights": ["highlight 1", "highlight 2"],
+  "topics": ["topic 1", "topic 2", "topic 3"],
+  "sentiment": "positive/neutral/negative",
+  "contentQuality": "high/medium/low",
+  "recommendations": ["recommendation 1", "recommendation 2"]
+}
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.4,
+      },
+    });
+
+    return safeParse(response.text, {
+      summary: 'Summary could not be generated.',
+      keyPoints: [],
+      highlights: [],
+      topics: [],
+      sentiment: 'neutral',
+      contentQuality: 'medium',
+      recommendations: [],
+    });
+  } catch (error) {
+    console.error('Error generating text summary:', error.message);
+
+    if (error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('⚠️  API quota exceeded. Using fallback summary.');
+      return {
+        summary: `Document analyzed: ${additionalContext.skills?.length ? `Skills: ${additionalContext.skills.join(', ')}` : 'Content processed'}`,
+        keyPoints: additionalContext.skills?.slice(0, 3) || [],
+        highlights: additionalContext.skills?.slice(3, 5) || [],
+        topics: additionalContext.skills?.slice(5) || [],
+        sentiment: 'neutral',
+        contentQuality: 'medium',
+        recommendations: [],
+        _note: 'Summary provided without AI analysis due to API quota limits',
+      };
+    }
+
+    return {
+      summary: 'Summary generation failed. Please try again.',
+      keyPoints: [],
+      highlights: [],
+      topics: [],
+      sentiment: 'neutral',
+      contentQuality: 'medium',
+      recommendations: [],
+      error: error.message,
+    };
+  }
 };
 
 module.exports = {
   generateCvAnalysis,
   generateJobMatchAdvice,
+  generateTextSummary,
 };
